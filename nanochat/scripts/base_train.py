@@ -30,6 +30,9 @@ run = "dummy" # wandb run name default ("dummy" is special - we won't log to wan
 # Model architecture
 depth = 20 # the depth of the Transformer model to train, rest of the kwargs are derived
 max_seq_len = 2048 # max context length
+# Quantization
+ternary_weights = False # enable ternary kernels across the transformer blocks
+ternary_threshold = 0.7 # relative magnitude threshold when quantizing to ternary values
 # Training horizon. Only one of these 3 will be used, in this order of precedence.
 num_iterations = -1 # explicit number of steps of the optimization (-1 = disable)
 target_flops = -1.0 # calculate num_iterations to reach target_flops. Useful for scaling laws experiments (-1 = disable)
@@ -60,6 +63,11 @@ user_config = {k: globals()[k] for k in config_keys} # will be useful for loggin
 ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init()
 master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
 autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+
+if ternary_weights and ternary_threshold <= 0:
+    raise ValueError("ternary_threshold must be positive when ternary_weights is enabled")
+if ternary_weights:
+    print0(f"Using ternary weights with threshold {ternary_threshold:.3f}")
 
 # wandb logging init
 use_dummy_wandb = run == "dummy" or not master_process
@@ -92,7 +100,16 @@ print0(f"Tokens / micro-batch: {world_tokens_per_fwdbwd:,}")
 print0(f"Total batch size {total_batch_size:,} => gradient accumulation steps: {grad_accum_steps}")
 # -----------------------------------------------------------------------------
 # Initialize the Model
-model_config_kwargs = dict(sequence_len=max_seq_len, vocab_size=vocab_size, n_layer=num_layers, n_head=num_heads, n_kv_head=num_kv_heads, n_embd=model_dim)
+model_config_kwargs = dict(
+    sequence_len=max_seq_len,
+    vocab_size=vocab_size,
+    n_layer=num_layers,
+    n_head=num_heads,
+    n_kv_head=num_kv_heads,
+    n_embd=model_dim,
+    ternary_weights=ternary_weights,
+    ternary_threshold=ternary_threshold,
+)
 with torch.device("meta"):
     model_config = GPTConfig(**model_config_kwargs)
     model = GPT(model_config)

@@ -1,5 +1,9 @@
-import torch
+import pytest
 
+torch = pytest.importorskip("torch")
+import torch.nn as nn
+
+from nanochat.gpt import GPT, GPTConfig
 from nanochat.kernels import TernaryLinear, ternary_linear_kernel, ternary_quantize
 
 
@@ -35,3 +39,39 @@ def test_ternary_kernel_backward_masks_zero_entries():
     assert torch.all(torch.isfinite(inputs.grad))
     assert torch.all(torch.isfinite(weight.grad))
     assert torch.allclose(weight.grad * (1 - stats.mask), torch.zeros_like(weight.grad), atol=1e-6)
+
+
+def test_gpt_ternary_flag_switches_linear_layers():
+    config = GPTConfig(
+        sequence_len=8,
+        vocab_size=32,
+        n_layer=1,
+        n_head=2,
+        n_kv_head=2,
+        n_embd=16,
+        ternary_weights=True,
+        ternary_threshold=0.55,
+    )
+    model = GPT(config)
+    block = model.transformer.h[0]
+    assert isinstance(block.attn.c_q, TernaryLinear)
+    assert isinstance(block.attn.c_proj, TernaryLinear)
+    assert isinstance(block.mlp.c_fc, TernaryLinear)
+    assert isinstance(block.mlp.c_proj, TernaryLinear)
+    assert block.attn.c_q.threshold == pytest.approx(0.55, abs=1e-6)
+    assert isinstance(model.lm_head, TernaryLinear)
+
+    dense_config = GPTConfig(
+        sequence_len=8,
+        vocab_size=32,
+        n_layer=1,
+        n_head=2,
+        n_kv_head=2,
+        n_embd=16,
+        ternary_weights=False,
+    )
+    dense_model = GPT(dense_config)
+    dense_block = dense_model.transformer.h[0]
+    assert isinstance(dense_block.attn.c_q, nn.Linear)
+    assert isinstance(dense_block.mlp.c_fc, nn.Linear)
+    assert isinstance(dense_model.lm_head, nn.Linear)

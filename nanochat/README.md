@@ -69,6 +69,14 @@ Unsurprisingly, $100 is not enough to train a highly performant ChatGPT clone. I
 
 The default nanochat model continues to use full-precision weights, but the architecture now supports a ternary variant that quantizes each linear projection to values in {-α, 0, +α}. Set `ternary_weights=True` when constructing `GPTConfig` (optionally adjusting `ternary_threshold`) to enable ternary projections across the attention, MLP, and output head. The ternary kernel applies a data-driven scaling factor per output channel so that the quantized matrices preserve the magnitude of the dominant weights while zeroing out smaller contributions. Because the ternary kernel is implemented with a custom autograd function, training remains end-to-end differentiable with masked gradients flowing only through active weights. This configuration can be useful when experimenting with faster training iterations or reduced memory footprints while staying close to the original design philosophy.
 
+To toggle the ternary weights in end-to-end runs without editing code, pass the flag through the training scripts, e.g.:
+
+```bash
+torchrun --nproc_per_node=8 -m scripts.base_train -- --ternary_weights=True --ternary_threshold=0.6
+```
+
+The same configurator mechanism works for other stages (mid-training, SFT, RL) because checkpoints now persist the ternary settings.
+
 That said, to give a sense, the example changes needed for the [speedrun.sh](speedrun.sh) file to train a GPT-2 grade model d26 only involve three changes:
 
 ```bash
