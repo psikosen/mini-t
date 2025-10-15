@@ -203,6 +203,8 @@ while True:
                     "n_head": model.config.n_head,
                     "n_kv_head": model.config.n_kv_head,
                     "n_embd": model.config.n_embd,
+                    "ternary_weights": model.config.ternary_weights,
+                    "ternary_threshold": model.config.ternary_threshold,
                 },
                 "user_config": user_config, # inputs to the training script
             }

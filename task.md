@@ -7,3 +7,5 @@
 - [x] Run project tests/lints and document results
 - [x] Identify unsupported binary assets in the repository
 - [x] Remove unsupported binary files and document their locations
+- [x] Expose ternary configuration flags in training checkpoints and scripts
+- [x] Expand ternary documentation and tests to cover CLI usage
