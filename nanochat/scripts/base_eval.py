@@ -15,11 +15,12 @@ from nanochat.tokenizer import HuggingFaceTokenizer
 from nanochat.checkpoint_manager import load_model
 from nanochat.core_eval import evaluate_task
 from tasks.seal_arc import SealArcFewShot
+from nanochat.logging_utils import LogRecord, log
 
 # -----------------------------------------------------------------------------
 # nanoChat specific function dealing with I/O etc.
 
-def evaluate_model(model, tokenizer, device, max_per_task=-1):
+def evaluate_model(model, tokenizer, device, max_per_task=-1, *, enable_logging=True):
     """
     Evaluate a base model on the CORE benchmark.
     - max_per_task: crop the data to this many examples per task for testing (-1 = disable)
@@ -70,6 +71,20 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
         random_baseline = row["Random baseline"].values[0]
         centered_result = (accuracy - 0.01 * random_baseline) / (1.0 - 0.01 * random_baseline)
         centered_results[label] = centered_result
+        if enable_logging:
+            log(
+                LogRecord(
+                    filename=__file__,
+                    classname="base_eval",
+                    function="evaluate_model",
+                    system_section="evaluation",
+                    line_num=0,
+                    message=(
+                        f"task={label} accuracy={accuracy:.4f} centered={centered_result:.4f} "
+                        f"examples={len(data)}"
+                    ),
+                )
+            )
         end_time = time.time()
         print0(f"accuracy: {accuracy:.4f} | centered: {centered_result:.4f} | time: {end_time - start_time:.2f}s")
 
@@ -79,10 +94,21 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
         "centered_results": centered_results,
         "core_metric": core_metric,
     }
+    if enable_logging:
+        log(
+            LogRecord(
+                filename=__file__,
+                classname="base_eval",
+                function="evaluate_model",
+                system_section="summary",
+                line_num=0,
+                message=f"core_metric={core_metric:.4f} tasks={len(results)}",
+            )
+        )
     return out
 
 
-def evaluate_seal_arc(model, tokenizer, device, args):
+def evaluate_seal_arc(model, tokenizer, device, args, *, enable_logging=True):
     if not args.seal_arc_json:
         return {}
     task = SealArcFewShot(args.seal_arc_json, split=args.seal_arc_split, limit=args.seal_arc_limit)
@@ -97,6 +123,20 @@ def evaluate_seal_arc(model, tokenizer, device, args):
     print0(f"Evaluating {args.seal_arc_label} ({task_meta['num_fewshot']}-shot)... ", end='')
     accuracy = evaluate_task(model, tokenizer, data, device, task_meta)
     print0(f"accuracy: {accuracy:.4f} | examples: {len(data)}")
+    if enable_logging:
+        log(
+            LogRecord(
+                filename=__file__,
+                classname="base_eval",
+                function="evaluate_seal_arc",
+                system_section="evaluation",
+                line_num=0,
+                message=(
+                    f"label={args.seal_arc_label} accuracy={accuracy:.4f} "
+                    f"examples={len(data)} fewshot={task_meta['num_fewshot']}"
+                ),
+            )
+        )
     return {args.seal_arc_label: {'accuracy': accuracy, 'num_fewshot': task_meta['num_fewshot'], 'num_examples': len(data)}}
 
 
@@ -143,6 +183,7 @@ def main(argv=None):
 
     # distributed / precision setup
     ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init()
+    master_process = ddp_rank == 0
     autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
 
     # Load model and tokenizer from command line or from file system
@@ -159,13 +200,25 @@ def main(argv=None):
 
     # Evaluate the model
     with autocast_ctx:
-        out = evaluate_model(model, tokenizer, device, max_per_task=args.max_per_task)
-        seal_results = evaluate_seal_arc(model, tokenizer, device, args)
+        out = evaluate_model(
+            model,
+            tokenizer,
+            device,
+            max_per_task=args.max_per_task,
+            enable_logging=master_process,
+        )
+        seal_results = evaluate_seal_arc(
+            model,
+            tokenizer,
+            device,
+            args,
+            enable_logging=master_process,
+        )
 
     # Write out the results to a csv file
     core_metric = None
     centered_results = {}
-    if ddp_rank == 0:
+    if master_process:
         base_dir = get_base_dir()
         output_csv_path = os.path.join(base_dir, "base_eval", f"{model_slug}.csv")
         os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
@@ -186,6 +239,19 @@ def main(argv=None):
         print0("="*80)
         with open(output_csv_path, 'r') as f:
             print0(f.read())
+        log(
+            LogRecord(
+                filename=__file__,
+                classname="base_eval",
+                function="main",
+                system_section="reporting",
+                line_num=0,
+                message=(
+                    f"wrote_csv={output_csv_path} core_metric={core_metric:.4f} "
+                    f"seal_tasks={len(seal_results)}"
+                ),
+            )
+        )
 
     # Log to report
     from nanochat.report import get_report
@@ -199,6 +265,17 @@ def main(argv=None):
     if seal_results:
         report_payload.append({k: v['accuracy'] for k, v in seal_results.items()})
     get_report().log(section="Base model evaluation", data=report_payload)
+    if master_process:
+        log(
+            LogRecord(
+                filename=__file__,
+                classname="base_eval",
+                function="main",
+                system_section="reporting",
+                line_num=0,
+                message="report_section=Base model evaluation",
+            )
+        )
 
     compute_cleanup()
 
