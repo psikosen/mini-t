@@ -18,3 +18,6 @@
 - [x] Add LoRA-based few-shot training stage and configuration knobs
 - [x] Extend evaluation/reporting to cover SEAL ARC benchmarks
 - [x] Instrument CORE/SEAL evaluation scripts with Sherlock-compliant structured logging
+
+## Maintenance
+- [x] Declare evaluation/test dependencies (jinja2, pandas, PyYAML) in `pyproject.toml`
