@@ -17,3 +17,4 @@
 - [x] Implement ARC few-shot dataset loader compatible with nanochat `Task`
 - [x] Add LoRA-based few-shot training stage and configuration knobs
 - [x] Extend evaluation/reporting to cover SEAL ARC benchmarks
+- [x] Instrument CORE/SEAL evaluation scripts with Sherlock-compliant structured logging
