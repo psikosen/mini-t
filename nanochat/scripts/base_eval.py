@@ -1,16 +1,7 @@
-"""
-Evlauate the CORE metric for a given model.
+"""Evaluate the CORE metric and optional SEAL ARC benchmark for a given model."""
 
-Run on a single GPU:
-python base_eval.py
-
-Run with torchrun on e.g. 8 GPUs:
-torchrun --nproc_per_node=8 base_eval.py
-
-The script will print the CORE metric to the console.
-"""
+import argparse
 import os
-import sys
 import time
 import json
 import random
@@ -23,6 +14,7 @@ from nanochat.common import compute_init, compute_cleanup, print0, get_base_dir
 from nanochat.tokenizer import HuggingFaceTokenizer
 from nanochat.checkpoint_manager import load_model
 from nanochat.core_eval import evaluate_task
+from tasks.seal_arc import SealArcFewShot
 
 # -----------------------------------------------------------------------------
 # nanoChat specific function dealing with I/O etc.
@@ -85,9 +77,38 @@ def evaluate_model(model, tokenizer, device, max_per_task=-1):
     out = {
         "results": results,
         "centered_results": centered_results,
-        "core_metric": core_metric
+        "core_metric": core_metric,
     }
     return out
+
+
+def evaluate_seal_arc(model, tokenizer, device, args):
+    if not args.seal_arc_json:
+        return {}
+    task = SealArcFewShot(args.seal_arc_json, split=args.seal_arc_split, limit=args.seal_arc_limit)
+    data = task.build_eval_items()
+    if not data:
+        return {}
+    task_meta = {
+        'task_type': 'language_modeling',
+        'num_fewshot': len(data[0]['fewshot_examples']),
+        'continuation_delimiter': '\n'
+    }
+    print0(f"Evaluating {args.seal_arc_label} ({task_meta['num_fewshot']}-shot)... ", end='')
+    accuracy = evaluate_task(model, tokenizer, data, device, task_meta)
+    print0(f"accuracy: {accuracy:.4f} | examples: {len(data)}")
+    return {args.seal_arc_label: {'accuracy': accuracy, 'num_fewshot': task_meta['num_fewshot'], 'num_examples': len(data)}}
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Evaluate CORE and optional SEAL ARC benchmarks.")
+    parser.add_argument("hf_path", nargs="?", help="Optional HuggingFace model path to evaluate.")
+    parser.add_argument("--seal-arc-json", dest="seal_arc_json", help="Path to a SEAL ARC curriculum JSON file.")
+    parser.add_argument("--seal-arc-split", dest="seal_arc_split", default="train", help="Split name to filter within the SEAL ARC JSON.")
+    parser.add_argument("--seal-arc-limit", dest="seal_arc_limit", type=int, default=None, help="Optional limit on the number of SEAL ARC tasks.")
+    parser.add_argument("--seal-arc-label", dest="seal_arc_label", default="SEAL-ARC", help="Label used when reporting SEAL ARC results.")
+    parser.add_argument("--max-per-task", dest="max_per_task", type=int, default=-1, help="Maximum examples per CORE task (for debugging).")
+    return parser.parse_args(argv)
 
 # -----------------------------------------------------------------------------
 # HuggingFace loading utilities and light wrappers for a model
@@ -117,30 +138,29 @@ def load_hf_model(hf_path: str, device):
     return model, tokenizer
 
 # -----------------------------------------------------------------------------
-def main():
-    assert len(sys.argv) in [1, 2], "Usage: python base_eval.py [hf_path]"
+def main(argv=None):
+    args = parse_args(argv)
 
     # distributed / precision setup
     ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init()
     autocast_ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
 
     # Load model and tokenizer from command line or from file system
-    if len(sys.argv) >= 2:
-        # atm assume that if a path is given, it's a huggingface model path
-        hf_path = sys.argv[1]
+    if args.hf_path:
+        hf_path = args.hf_path
         print0(f"Loading huggingface model from: {hf_path}")
         model, tokenizer = load_hf_model(hf_path, device)
-        model_name = hf_path # just for logging
-        model_slug = hf_path.replace("/", "-") # for the output csv file
+        model_name = hf_path
+        model_slug = hf_path.replace("/", "-")
     else:
-        # load a local model from the file system
         model, tokenizer, meta = load_model("base", device, phase="eval")
-        model_name = f"base_model (step {meta['step']})" # just for logging
-        model_slug = f"base_model_{meta['step']:06d}" # for the output csv file
+        model_name = f"base_model (step {meta['step']})"
+        model_slug = f"base_model_{meta['step']:06d}"
 
     # Evaluate the model
     with autocast_ctx:
-        out = evaluate_model(model, tokenizer, device)
+        out = evaluate_model(model, tokenizer, device, max_per_task=args.max_per_task)
+        seal_results = evaluate_seal_arc(model, tokenizer, device, args)
 
     # Write out the results to a csv file
     core_metric = None
@@ -155,9 +175,12 @@ def main():
         with open(output_csv_path, 'w') as f:
             f.write(f"{'Task':<35}, {'Accuracy':<10}, {'Centered':<10}\n")
             for label in results:
-                f.write(f"{label:<35}, {results[label]:<10.6f}, {centered_results[label]:<10.6f}\n")
+                centered = centered_results.get(label)
+                centered_str = f"{centered:<10.6f}" if centered is not None else ""
+                f.write(f"{label:<35}, {results[label]:<10.6f}, {centered_str}\n")
+            for label, metrics in seal_results.items():
+                f.write(f"{label:<35}, {metrics['accuracy']:<10.6f}, {'':<10}\n")
             f.write(f"{'CORE':<35}, {'':<10}, {core_metric:<10.6f}\n")
-        # Print the content of the csv file to console too
         print0("="*80)
         print0(f"Model: {model_name}")
         print0("="*80)
@@ -166,13 +189,16 @@ def main():
 
     # Log to report
     from nanochat.report import get_report
-    get_report().log(section="Base model evaluation", data=[
+    report_payload = [
         {
             "Model": model_name,
             "CORE metric": core_metric,
         },
-        centered_results, # the full table
-    ])
+        centered_results,
+    ]
+    if seal_results:
+        report_payload.append({k: v['accuracy'] for k, v in seal_results.items()})
+    get_report().log(section="Base model evaluation", data=report_payload)
 
     compute_cleanup()
 

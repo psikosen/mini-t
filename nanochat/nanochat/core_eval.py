@@ -174,10 +174,18 @@ def evaluate_example(idx, model, tokenizer, data, device, task_meta):
 
     # Sample few-shot examples (excluding current item)
     fewshot_examples = []
-    if num_fewshot > 0:
+    pinned = getattr(item, 'fewshot_examples', None)
+    if isinstance(item, dict):
+        pinned = item.get('fewshot_examples', pinned)
+    if pinned:
+        fewshot_examples = pinned
+    elif num_fewshot > 0:
         rng = random.Random(1234 + idx)
         available_indices = [i for i in range(len(data)) if i != idx]
-        fewshot_indices = rng.sample(available_indices, num_fewshot)
+        if len(available_indices) < num_fewshot:
+            fewshot_indices = available_indices
+        else:
+            fewshot_indices = rng.sample(available_indices, num_fewshot)
         fewshot_examples = [data[i] for i in fewshot_indices]
 
     # Render prompts and batch sequences based on task type

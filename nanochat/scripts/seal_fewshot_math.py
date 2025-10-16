@@ -14,10 +14,11 @@ import math
 import os
 import statistics
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from nanochat.arc_prompt import format_arc_prompt, format_grid
+from nanochat.logging_utils import LogRecord, log
 
 
 @dataclass
@@ -28,65 +29,6 @@ class ModelConfig:
     n_head: int = 6
     n_kv_head: int = 6
     n_embd: int = 768
-
-
-@dataclass
-class LogRecord:
-    filename: str
-    classname: str
-    function: str
-    system_section: str
-    line_num: int
-    message: str
-    method: str = "NONE"
-    error: Optional[str] = None
-    db_phase: str = "none"
-
-    def as_json(self) -> str:
-        payload = {
-            "filename": self.filename,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "classname": self.classname,
-            "function": self.function,
-            "system_section": self.system_section,
-            "line_num": self.line_num,
-            "error": self.error,
-            "db_phase": self.db_phase,
-            "method": self.method,
-            "message": self.message,
-        }
-        return json.dumps(payload)
-
-    def render(self) -> str:
-        lines = [self.as_json(), "Continuous skepticism (Sherlock Protocol)"]
-        lines.append("* Could this change affect unexpected files/systems?")
-        lines.append("* Any hidden dependencies or cascades?")
-        lines.append("* What edge cases and failure modes are unhandled?")
-        lines.append("* If stuck, work backward from the desired outcome.")
-        return "\n".join(lines)
-
-
-def log(record: LogRecord) -> None:
-    print(record.render())
-
-
-def format_grid(grid: List[List[int]]) -> str:
-    return "\n".join(" ".join(str(cell) for cell in row) for row in grid)
-
-
-def format_task(train: List[Dict[str, List[List[int]]]], test: Dict[str, List[List[int]]]) -> str:
-    lines = ["Solve the ARC task by predicting the correct output grid.", "", "==TRAIN=="]
-    for idx, example in enumerate(train):
-        lines.append(f"Example {idx + 1} input:")
-        lines.append(format_grid(example["input"]))
-        lines.append("Example output:")
-        lines.append(format_grid(example["output"]))
-        lines.append("")
-    lines.append("==TEST==")
-    lines.append("Test input:")
-    lines.append(format_grid(test["input"]))
-    lines.append("Test output:")
-    return "\n".join(lines)
 
 
 def count_model_params(config: ModelConfig) -> int:
@@ -128,7 +70,7 @@ def estimate_prompt_tokens(
     train: List[Dict[str, List[List[int]]]],
     test: Dict[str, List[List[int]]],
 ) -> int:
-    prompt = format_task(train, test)
+    prompt = format_arc_prompt(train, test)
     return approximate_tokens_from_chars(len(prompt))
 
 
