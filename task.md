@@ -9,3 +9,11 @@
 - [x] Remove unsupported binary files and document their locations
 - [x] Expose ternary configuration flags in training checkpoints and scripts
 - [x] Expand ternary documentation and tests to cover CLI usage
+- [ ] Integrate SEAL few-shot curriculum into nanochat pipelines
+
+## Current Initiative: SEAL Few-Shot Integration
+- [x] Review SEAL repository structure and identify reusable few-shot assets
+- [x] Quantify compute/token budgets for SEAL-style few-shot adaptation on nanochat
+- [ ] Implement ARC few-shot dataset loader compatible with nanochat `Task`
+- [ ] Add LoRA-based few-shot training stage and configuration knobs
+- [ ] Extend evaluation/reporting to cover SEAL ARC benchmarks
