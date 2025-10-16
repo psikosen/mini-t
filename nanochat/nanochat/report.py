@@ -205,7 +205,7 @@ EXPECTED_FILES = [
     "chat-evaluation-rl.md",
 ]
 # the metrics we're currently interested in
-chat_metrics = ["ARC-Easy", "ARC-Challenge", "MMLU", "GSM8K", "HumanEval", "ChatCORE"]
+chat_metrics = ["ARC-Easy", "ARC-Challenge", "MMLU", "GSM8K", "HumanEval", "ChatCORE", "SEAL-ARC"]
 
 def extract(section, keys):
     """simple def to extract a single key from a section"""

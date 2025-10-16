@@ -18,10 +18,12 @@ python -m pytest tests/test_rustbpe.py -v -s
 -v is verbose, -s is show prints
 """
 
-import regex as re
 from collections import Counter, defaultdict
 import time
 import pytest
+
+pytest.importorskip("regex", reason="regex package is required for rustbpe comparison tests")
+import regex as re
 
 rustbpe = pytest.importorskip("rustbpe", reason="rustbpe extension module is not built in this environment")
 import tiktoken
