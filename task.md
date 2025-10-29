@@ -21,3 +21,4 @@
 
 ## Maintenance
 - [x] Declare evaluation/test dependencies (jinja2, pandas, PyYAML) in `pyproject.toml`
+- [x] Document nanochat training, monitoring, and deployment procedures in `README.md`
